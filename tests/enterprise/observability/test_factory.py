@@ -231,3 +231,19 @@ class TestFactoryCreateProviderDirect:
 
         assert isinstance(result, PhoenixObservabilityProvider)
         mock_logger.info.assert_called_once_with("Observability provider: Arize Phoenix")
+
+
+class TestFactorySovara:
+    def test_returns_sovara_when_sovara_langchain_is_installed(self, monkeypatch):
+        from codemie.enterprise.observability.sovara_provider import SovaraObservabilityProvider
+
+        monkeypatch.setattr("codemie.configs.config.OBSERVABILITY_PROVIDER", "sovara")
+        with patch("importlib.util.find_spec", return_value=object()):
+            provider = get_observability_provider()
+        assert isinstance(provider, SovaraObservabilityProvider)
+
+    def test_falls_back_to_noop_without_sovara_langchain(self, monkeypatch):
+        monkeypatch.setattr("codemie.configs.config.OBSERVABILITY_PROVIDER", "sovara")
+        with patch("importlib.util.find_spec", return_value=None):
+            provider = get_observability_provider()
+        assert isinstance(provider, NoOpObservabilityProvider)

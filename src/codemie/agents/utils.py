@@ -365,7 +365,7 @@ def validate_json_schema(schema):
         return False
 
 
-def get_run_config(
+def get_run_config(  # noqa: PLR0913, PLR0917 - existing signature, plus project
     request: Optional[AssistantChatRequest],
     llm_model: str,
     agent_name: str,
@@ -375,6 +375,7 @@ def get_run_config(
     assistant_version: Optional[int] = None,
     trace_context=None,  # For workflow trace unification
     request_uuid: Optional[str] = None,
+    project: str | None = None,
 ) -> Dict[str, Any]:
     """
     Creates a run configuration based on the request, model, and agent name.
@@ -449,12 +450,15 @@ def get_run_config(
     else:
         logger.debug(f"STANDALONE TRACE: agent='{agent_name}'")
 
-    # Obtain a provider-agnostic trace context manager (sets trace name, user, session, tags)
-    trace_ctx = provider.get_trace_context(
+    # Obtain a provider-agnostic context manager for the run (sets trace name, user, session, tags)
+    trace_ctx = provider.get_run_context(
         trace_name=agent_name,
         user_id=username,
         session_id=conversation_id,
         tags=tags,
+        user_input=request.text if request else None,
+        project=project,
+        workflow_execution_id=getattr(request, "workflow_execution_id", None),
     )
 
     return {

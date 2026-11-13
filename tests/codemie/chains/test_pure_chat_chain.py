@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from contextlib import contextmanager
 from typing import Iterator
 from unittest.mock import Mock, patch
 
@@ -117,3 +118,58 @@ class TestPureChatChainStream:
         for text in texts:
             if text is not None:  # Skip None values
                 yield ChatGenerationChunk(text=text)
+
+
+class TestPureChatChainTraceContext:
+    """PureChatChain enters the observability trace context (_trace_ctx), as the agents do."""
+
+    @pytest.fixture
+    def trace(self):
+        events = []
+
+        @contextmanager
+        def trace_ctx():
+            events.append("enter")
+            yield
+            events.append("exit")
+
+        return events, trace_ctx
+
+    def _chain(self, runnable, trace_ctx):
+        chain = PureChatChain(
+            request=AssistantChatRequest(text="Q", history=[], file_name=None, system_prompt=""),
+            system_prompt="You are a helpful assistant",
+            llm_model=LLMService.BASE_NAME_GPT_41,
+            llm=Mock(spec=Runnable),
+            thread_generator=Mock(spec=ThreadedGenerator),
+        )
+        chain._build_chain = lambda: runnable
+        chain._get_config = lambda: {"run_name": "chat", "_trace_ctx": trace_ctx()}
+        return chain
+
+    def test_invoke_runs_inside_the_trace_context(self, trace):
+        events, trace_ctx = trace
+        runnable = Mock(spec=Runnable)
+        runnable.invoke.side_effect = lambda input, config: events.append("invoke") or "answer"
+
+        result = self._chain(runnable, trace_ctx).invoke({"question": "Q"})
+
+        assert events == ["enter", "invoke", "exit"]
+        assert result.generated == "answer"
+        assert "_trace_ctx" not in runnable.invoke.call_args.kwargs["config"]
+
+    def test_stream_runs_inside_the_trace_context(self, trace):
+        events, trace_ctx = trace
+
+        def stream(input, config):
+            assert "_trace_ctx" not in config
+            for chunk in ("a", "b"):
+                events.append(chunk)
+                yield chunk
+
+        runnable = Mock(spec=Runnable)
+        runnable.with_config.return_value.stream.side_effect = stream
+
+        self._chain(runnable, trace_ctx).stream()
+
+        assert events == ["enter", "a", "b", "exit"]

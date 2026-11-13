@@ -575,6 +575,7 @@ class AIToolsAgent(WorkspaceAwareAgent):
             assistant_version=assistant_version,
             trace_context=self.trace_context,  # Pass trace context for workflow unification
             request_uuid=self.request_uuid,
+            project=self.assistant.project if self.assistant else None,
         )
 
     @staticmethod
