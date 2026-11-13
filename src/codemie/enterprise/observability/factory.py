@@ -30,7 +30,7 @@ def get_observability_provider() -> ObservabilityProvider:
     """Return the active observability provider singleton.
 
     Provider selection priority:
-    1. OBSERVABILITY_PROVIDER config value ("langfuse" | "phoenix" | "none")
+    1. OBSERVABILITY_PROVIDER config value ("langfuse" | "phoenix" | "sovara" | "none")
     2. Backward-compat: if OBSERVABILITY_PROVIDER unset/none AND LANGFUSE_TRACES=True → langfuse
     3. Default: NoOpObservabilityProvider
 
@@ -51,7 +51,7 @@ def reset_provider() -> None:
     _provider = None
 
 
-def _create_provider() -> ObservabilityProvider:
+def _create_provider() -> ObservabilityProvider:  # noqa: PLR0911 - one return per provider
     """Create a new provider instance based on current config."""
     from codemie.configs import config, logger
 
@@ -92,6 +92,20 @@ def _create_provider() -> ObservabilityProvider:
 
         logger.info("Observability provider: Arize Phoenix")
         return PhoenixObservabilityProvider()
+
+    if provider_name == "sovara":
+        from importlib.util import find_spec  # noqa: PLC0415 - like the other providers' branches
+
+        if find_spec("sovara_langchain") is None:
+            logger.warning(
+                "OBSERVABILITY_PROVIDER=sovara but sovara-langchain is not installed. Falling back to NoOp provider."
+            )
+            return NoOpObservabilityProvider()
+
+        from .sovara_provider import SovaraObservabilityProvider  # noqa: PLC0415 - loaded only when selected
+
+        logger.info("Observability provider: Sovara")
+        return SovaraObservabilityProvider()
 
     if provider_name not in ("", "none"):
         from codemie.configs import logger as log

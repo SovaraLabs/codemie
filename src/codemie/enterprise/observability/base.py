@@ -125,6 +125,49 @@ class ObservabilityProvider(ABC):
         """
         return contextlib.nullcontext()
 
+    def get_run_context(  # noqa: PLR0913 - keyword-only run attributes
+        self,
+        *,
+        trace_name: str,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        tags: list[str] | None = None,
+        user_input: str | None = None,  # noqa: ARG002 - for overriding providers
+        project: str | None = None,  # noqa: ARG002 - for overriding providers
+        workflow_execution_id: str | None = None,  # noqa: ARG002 - for overriding providers
+    ):
+        """Return the context manager an agent run executes in (the run config's ``_trace_ctx``).
+
+        The default is ``get_trace_context`` with the trace attributes. A provider that records
+        the run itself overrides it: it also gets the user's input, the CodeMie project and the
+        workflow execution the run belongs to.
+
+        Must never raise; degrade silently to nullcontext() on any failure.
+        """
+        return self.get_trace_context(trace_name=trace_name, user_id=user_id, session_id=session_id, tags=tags)
+
+    def get_workflow_run_context(
+        self,
+        *,
+        execution_id: str,  # noqa: ARG002 - for overriding providers
+        workflow_name: str,  # noqa: ARG002 - for overriding providers
+        project: str | None = None,  # noqa: ARG002 - for overriding providers
+        user_input: str | None = None,  # noqa: ARG002 - for overriding providers
+    ):
+        """Return the context manager one workflow run (or resume) executes in.
+
+        Agent runs inside it see it as their enclosing context. Default implementation returns
+        nullcontext(). Must never raise.
+        """
+        return contextlib.nullcontext()
+
+    def wrap_chat_model(self, llm: Any) -> Any:
+        """Return the chat model CodeMie uses for ``llm``; a provider may wrap it to see each call.
+
+        Default implementation returns ``llm`` unchanged. Must never raise.
+        """
+        return llm
+
     def update_current_observation(
         self,
         *,

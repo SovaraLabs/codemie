@@ -350,6 +350,14 @@ def _model_details(temperature_supported, top_p_supported=True, base_name="gemin
     details.configuration = None
     return details
 
+    def test_returns_the_model_as_wrapped_by_the_observability_provider(self, mock_dependencies):
+        with patch('codemie.enterprise.observability.get_observability_provider') as get_provider:
+            llm = get_llm_by_credentials(llm_model="gpt-4")
+
+        wrap = get_provider.return_value.wrap_chat_model
+        wrap.assert_called_once()
+        assert llm is wrap.return_value
+
 
 class TestFilterParamsTemperature:
     """EPMCDME-15208: unsupported temperature is dropped, not forced to 1.

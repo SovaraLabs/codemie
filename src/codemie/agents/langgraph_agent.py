@@ -1408,6 +1408,7 @@ class LangGraphAgent(ToolCallConfirmationMixin, WorkspaceAwareAgent):
             assistant_version=assistant_version,
             trace_context=self.trace_context,
             request_uuid=self.request_uuid,
+            project=self.assistant.project if self.assistant else None,
         )
 
         # Add LangGraph specific configuration
