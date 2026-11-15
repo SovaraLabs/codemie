@@ -241,12 +241,14 @@ class SovaraObservabilityProvider(ObservabilityProvider):
 
     def _client(self, project: str | None) -> Any:
         """Return the Sovara client for a CodeMie project, created on first use."""
-        name = (project or "").strip() or config.SOVARA_DEFAULT_PROJECT
+        name = (project or "").strip()
+        if not name:
+            raise ValueError("A CodeMie project is required for Sovara recording.")
         with self._lock:
             client = self._clients.get(name)
             if client is None:
                 from sovara import SovaraClient  # noqa: PLC0415 - optional package
 
-                client = SovaraClient(project_name=name, agent_token=config.SOVARA_AGENT_TOKEN)
+                client = SovaraClient(project_name=name, api_key=config.SOVARA_API_KEY)
                 self._clients[name] = client
         return client

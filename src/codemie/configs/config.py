@@ -688,9 +688,7 @@ class Config(BaseSettings):
 
     # Sovara settings — used when OBSERVABILITY_PROVIDER=sovara (needs the sovara-langchain package).
     # The server URL comes from SOVARA_SERVER_URL, read by the Sovara SDK itself.
-    SOVARA_AGENT_TOKEN: str | None = None
-    # Sovara project for runs whose CodeMie project is unknown; other runs use their CodeMie project.
-    SOVARA_DEFAULT_PROJECT: str = "codemie"
+    SOVARA_API_KEY: str | None = None
 
     # ===========================================
     # OpenTelemetry Configuration

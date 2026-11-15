@@ -64,18 +64,16 @@ def provider(opened, monkeypatch):
     """An initialized provider whose clients are fakes, one per project."""
     provider = SovaraObservabilityProvider()
     provider._enabled = True
-    clients = {}
-    monkeypatch.setattr(
-        provider,
-        "_client",
-        lambda project: clients.setdefault(project or "codemie", FakeClient(project or "codemie", opened)),
-    )
+    fake = types.ModuleType("sovara")
+    fake.SovaraClient = Mock(side_effect=lambda project_name, api_key: FakeClient(project_name, opened))
+    monkeypatch.setitem(sys.modules, "sovara", fake)
     monkeypatch.setattr(sovara_provider, "_short_retries", nullcontext)
     return provider
 
 
 def agent_run(provider, name, **kwargs):
     kwargs.setdefault("session_id", "conv-1")
+    kwargs.setdefault("project", "payments")
     return provider.get_run_context(trace_name=name, **kwargs)
 
 
@@ -99,7 +97,7 @@ class TestChat:
         with agent_run(provider, "Second", user_input="b", session_id="conv-2"):
             pass
 
-        assert ("codemie", "trace", "Second", "codemie:chat:conv-2") in opened
+        assert ("payments", "trace", "Second", "codemie:chat:conv-2") in opened
 
     def test_no_recording_without_a_conversation(self, provider, opened):
         with agent_run(provider, "Helper", session_id=None):
@@ -114,7 +112,7 @@ class TestWorkflow:
             execution_id="exec-1", workflow_name="Release notes", project="payments", user_input="v2"
         )
         with run:
-            with agent_run(provider, "Writer", user_input="task", workflow_execution_id="exec-1"):
+            with agent_run(provider, "Writer", user_input="task", project=None, workflow_execution_id="exec-1"):
                 pass
 
         assert opened == [
@@ -134,6 +132,21 @@ class TestWorkflow:
 
 
 class TestFailOpen:
+    @pytest.mark.parametrize("project", [None, "", "   "])
+    @pytest.mark.parametrize("workflow", [False, True])
+    def test_missing_project_runs_without_recording(self, provider, opened, project, workflow):
+        run = (
+            provider.get_workflow_run_context(execution_id="exec-1", workflow_name="W", project=project)
+            if workflow
+            else agent_run(provider, "Helper", project=project)
+        )
+        with run:
+            ran = True
+
+        assert ran
+        assert opened == []
+        sys.modules["sovara"].SovaraClient.assert_not_called()
+
     def test_sovara_failure_runs_unrecorded(self, provider, monkeypatch):
         monkeypatch.setattr(provider, "_client", Mock(side_effect=ConnectionError("down")))
         with patch.object(sovara_provider, "logger") as logger:
@@ -170,19 +183,20 @@ class TestFailOpen:
 
 
 class TestClients:
-    def test_one_client_per_project_with_the_configured_token(self, monkeypatch):
+    def test_one_client_per_project_with_the_configured_api_key(self, monkeypatch):
         fake = types.ModuleType("sovara")
         fake.SovaraClient = Mock(side_effect=lambda **kwargs: object())
         monkeypatch.setitem(sys.modules, "sovara", fake)
-        monkeypatch.setattr(sovara_provider.config, "SOVARA_AGENT_TOKEN", "token")
+        monkeypatch.setattr(sovara_provider.config, "SOVARA_API_KEY", "test-organization-key")
         provider = SovaraObservabilityProvider()
 
         payments = provider._client("payments")
 
-        assert provider._client("payments") is payments
+        assert provider._client(" payments ") is payments
         assert provider._client("other") is not payments
-        assert provider._client(None) is provider._client("codemie")
-        fake.SovaraClient.assert_any_call(project_name="payments", agent_token="token")
+        assert fake.SovaraClient.call_count == 2
+        fake.SovaraClient.assert_any_call(project_name="payments", api_key="test-organization-key")
+        fake.SovaraClient.assert_any_call(project_name="other", api_key="test-organization-key")
 
     def test_per_request_override_disables_recording(self, provider):
         assert provider.should_trace_request({"observability_traces_enabled": False}) is False
