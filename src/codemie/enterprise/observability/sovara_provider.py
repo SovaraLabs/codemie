@@ -42,6 +42,7 @@ from typing import Any
 from codemie.configs import config, logger
 
 from .base import ObservabilityProvider
+from .sovara_projects import SovaraProjects
 
 # Client recording the innermost active run, so nested runs join its trace and project.
 _active_client: ContextVar[Any | None] = ContextVar("sovara_active_client", default=None)
@@ -78,6 +79,7 @@ class SovaraObservabilityProvider(ObservabilityProvider):
         self._enabled = False
         self._clients: dict[str, Any] = {}
         self._lock = threading.Lock()
+        self._projects = SovaraProjects()
 
     def initialize(self) -> None:
         try:
@@ -239,6 +241,17 @@ class SovaraObservabilityProvider(ObservabilityProvider):
         stack.enter_context(client.turn(turn_input=run["user_input"]))
         stack.enter_context(_activate(client))
 
+    @contextmanager
+    def project_rename_context(self, old_name: str, new_name: str) -> Iterator[None]:
+        """Keep Sovara history under the renamed project and discard stale name caches."""
+        try:
+            with self._projects.rename(old_name, new_name):
+                yield
+        finally:
+            with self._lock:
+                self._clients.pop(old_name, None)
+                self._clients.pop(new_name, None)
+
     def _client(self, project: str | None) -> Any:
         """Return the Sovara client for a CodeMie project, created on first use."""
         name = (project or "").strip()
@@ -249,6 +262,9 @@ class SovaraObservabilityProvider(ObservabilityProvider):
             if client is None:
                 from sovara import SovaraClient  # noqa: PLC0415 - optional package
 
-                client = SovaraClient(project_name=name, api_key=config.SOVARA_API_KEY)
+                self._projects.ensure(name)
+                client = SovaraClient(
+                    project_name=name, api_key=config.SOVARA_API_KEY, base_url=config.SOVARA_SERVER_URL
+                )
                 self._clients[name] = client
         return client

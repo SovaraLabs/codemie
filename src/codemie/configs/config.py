@@ -687,7 +687,8 @@ class Config(BaseSettings):
     PHOENIX_BATCH_SPAN_PROCESSOR: bool = True
 
     # Sovara settings — used when OBSERVABILITY_PROVIDER=sovara (needs the sovara-langchain package).
-    # The server URL comes from SOVARA_SERVER_URL, read by the Sovara SDK itself.
+    # Both the project API and recording API must be reachable at this origin.
+    SOVARA_SERVER_URL: str | None = None
     SOVARA_API_KEY: str | None = None
 
     # ===========================================

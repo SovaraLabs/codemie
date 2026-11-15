@@ -64,8 +64,9 @@ def provider(opened, monkeypatch):
     """An initialized provider whose clients are fakes, one per project."""
     provider = SovaraObservabilityProvider()
     provider._enabled = True
+    monkeypatch.setattr(provider._projects, "ensure", Mock())
     fake = types.ModuleType("sovara")
-    fake.SovaraClient = Mock(side_effect=lambda project_name, api_key: FakeClient(project_name, opened))
+    fake.SovaraClient = Mock(side_effect=lambda project_name, api_key, base_url: FakeClient(project_name, opened))
     monkeypatch.setitem(sys.modules, "sovara", fake)
     monkeypatch.setattr(sovara_provider, "_short_retries", nullcontext)
     return provider
@@ -189,14 +190,19 @@ class TestClients:
         monkeypatch.setitem(sys.modules, "sovara", fake)
         monkeypatch.setattr(sovara_provider.config, "SOVARA_API_KEY", "test-organization-key")
         provider = SovaraObservabilityProvider()
+        monkeypatch.setattr(provider._projects, "ensure", Mock())
 
         payments = provider._client("payments")
 
         assert provider._client(" payments ") is payments
         assert provider._client("other") is not payments
         assert fake.SovaraClient.call_count == 2
-        fake.SovaraClient.assert_any_call(project_name="payments", api_key="test-organization-key")
-        fake.SovaraClient.assert_any_call(project_name="other", api_key="test-organization-key")
+        fake.SovaraClient.assert_any_call(
+            project_name="payments", api_key="test-organization-key", base_url=sovara_provider.config.SOVARA_SERVER_URL
+        )
+        fake.SovaraClient.assert_any_call(
+            project_name="other", api_key="test-organization-key", base_url=sovara_provider.config.SOVARA_SERVER_URL
+        )
 
     def test_per_request_override_disables_recording(self, provider):
         assert provider.should_trace_request({"observability_traces_enabled": False}) is False

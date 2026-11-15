@@ -36,8 +36,14 @@ class ObservabilityProvider(ABC):
 
     Implementations must be safe to call at any time — before initialization,
     after shutdown, or when the backend is unavailable. All methods must degrade
-    gracefully (return None/False/{}) rather than raising.
+    gracefully (return None/False/{}) rather than raising, except explicit project
+    lifecycle coordination, which must report failures to the initiating user.
     """
+
+    def project_rename_context(self, old_name: str, new_name: str) -> contextlib.AbstractContextManager:
+        """Coordinate an explicit project rename; ordinary providers need no action."""
+        del old_name, new_name
+        return contextlib.nullcontext()
 
     @abstractmethod
     def initialize(self) -> None:
