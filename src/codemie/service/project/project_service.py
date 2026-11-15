@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import re
+from contextlib import ExitStack
 from types import SimpleNamespace
 from typing import Final
 from uuid import UUID
@@ -28,6 +29,7 @@ from codemie.configs.customer_config import customer_config
 from codemie.configs.logger import logger
 from codemie.core.exceptions import ExtendedHTTPException
 from codemie.core.models import Application
+from codemie.enterprise.observability.factory import get_observability_provider
 from codemie.repository.application_repository import application_repository
 from codemie.repository.budget_repository import budget_repository
 from codemie.repository.cost_center_repository import cost_center_repository
@@ -320,7 +322,7 @@ class ProjectService:
         cli_analytics_enabled: bool | None = None,
     ) -> Application:
         cls._require_cli_analytics_write(user, cli_analytics_enabled)
-        with get_session() as session:
+        with ExitStack() as lifecycle, get_session() as session:
             project = cls._get_project_for_update(session, user, project_name)
             if cli_analytics_enabled and project.project_type == Application.ProjectType.PERSONAL:
                 raise ExtendedHTTPException(code=400, message=cls.ERRORS.PERSONAL_CLI_ANALYTICS)
@@ -355,6 +357,9 @@ class ProjectService:
             if validated_name is not None and validated_name != project.name:
                 # Registrations are keyed by project name: they move with it, in this transaction.
                 cls._lock_project_or_404(session, project.name)
+                lifecycle.enter_context(
+                    get_observability_provider().project_rename_context(project.name, validated_name)
+                )
                 RepositoryRegistrationRepository.rename_project(session, project.name, validated_name)
             project = application_repository.update_project(
                 session,
@@ -395,6 +400,7 @@ class ProjectService:
                     session,
                 )
             session.commit()
+            lifecycle.close()
             session.refresh(project)
             logger.info(
                 f"project_updated: project={project.name!r}, by={user.id}, "
@@ -726,7 +732,7 @@ class ProjectService:
         Budgets and budget groups are detached first, since both hold a foreign key to the project.
 
         Args:
-            session: Database session (caller commits/rolls back)
+            session: Database session; this method commits the deletion before remote cleanup
             project_name: Name of the project to delete
             project_type: Project type string (used for personal-project guard)
             actor_id: ID of the requesting user (for logging)
@@ -759,38 +765,40 @@ class ProjectService:
 
         counts = cls._check_has_no_resources(session, project_name, "deleted")
 
-        affected_integration_ids: list[str] = []
-        if counts.get("integrations_count", 0) > 0:
-            project_settings = Settings.get_by_project_names([project_name])
-            for setting in project_settings:
-                SettingsService.delete_setting(setting.id)
-                affected_integration_ids.append(setting.id)
-
-        affected_budget_ids = budget_repository.clear_project_on_deleted_budgets(session, project_name)
-        affected_group_ids = project_budget_group_repository.clear_project_on_deleted_groups(session, project_name)
-
         cls._lock_project_or_404(session, project_name)
-        RepositoryRegistrationRepository.delete_for_project(session, project_name)
-        application_repository.delete_by_name(session, project_name)
-        if creator_id is not None:
-            user_project_repository.remove_project(session, creator_id, project_name)
-            ProjectAssignmentService._sync_project_budget_member_removed(session, project_name, creator_id)
-            invalidate_user_from_cache(creator_id)
-        activity_event_repository.insert(
-            ActivityEventCreate(
-                domain=ActivityDomain.PROJECT_MANAGEMENT,
-                event_type=ProjectManagementEvent.PROJECT_DELETED,
-                entity_type=ActivityEntityType.PROJECT,
-                entity_id=project_name,
-                actor_id=actor_id,
-                attributes={
-                    "affected_budgets": affected_budget_ids,
-                    "affected_budget_groups": affected_group_ids,
-                    "affected_integrations": affected_integration_ids,
-                },
-            ),
-            session,
-        )
+        with get_observability_provider().project_delete_context(project_name):
+            affected_integration_ids: list[str] = []
+            if counts.get("integrations_count", 0) > 0:
+                project_settings = Settings.get_by_project_names([project_name])
+                for setting in project_settings:
+                    SettingsService.delete_setting(setting.id)
+                    affected_integration_ids.append(setting.id)
+
+            affected_budget_ids = budget_repository.clear_project_on_deleted_budgets(session, project_name)
+            affected_group_ids = project_budget_group_repository.clear_project_on_deleted_groups(session, project_name)
+
+            RepositoryRegistrationRepository.delete_for_project(session, project_name)
+            application_repository.delete_by_name(session, project_name)
+            if creator_id is not None:
+                user_project_repository.remove_project(session, creator_id, project_name)
+                ProjectAssignmentService._sync_project_budget_member_removed(session, project_name, creator_id)
+                invalidate_user_from_cache(creator_id)
+            activity_event_repository.insert(
+                ActivityEventCreate(
+                    domain=ActivityDomain.PROJECT_MANAGEMENT,
+                    event_type=ProjectManagementEvent.PROJECT_DELETED,
+                    entity_type=ActivityEntityType.PROJECT,
+                    entity_id=project_name,
+                    actor_id=actor_id,
+                    attributes={
+                        "affected_budgets": affected_budget_ids,
+                        "affected_budget_groups": affected_group_ids,
+                        "affected_integrations": affected_integration_ids,
+                    },
+                ),
+                session,
+            )
+            session.commit()
         logger.info(f"project_deleted: project={project_name}, by={actor_id}")
 
     @staticmethod

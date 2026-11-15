@@ -1032,7 +1032,14 @@ class WorkflowExecutor:
                 chunks_collector = []
                 workflow_succeeded = False
                 try:
-                    self._run_workflow_execution(graph_config, chunks_collector)
+                    run_context = get_observability_provider().get_workflow_run_context(
+                        execution_id=self.execution_id,
+                        workflow_name=self.workflow_config.name,
+                        project=self.workflow_config.project,
+                        user_input=self.user_input,
+                    )
+                    with run_context:
+                        self._run_workflow_execution(graph_config, chunks_collector)
                     workflow_succeeded = True
                 except InterruptedException as e:
                     self._handle_interrupt(str(e.message), e.interrupted_state, chunks_collector, e.checkpoint_state)

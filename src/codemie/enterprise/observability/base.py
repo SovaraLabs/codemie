@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any, Literal
 
 ObservationLevel = Literal["DEFAULT", "DEBUG", "WARNING", "ERROR"]
@@ -36,8 +37,19 @@ class ObservabilityProvider(ABC):
 
     Implementations must be safe to call at any time — before initialization,
     after shutdown, or when the backend is unavailable. All methods must degrade
-    gracefully (return None/False/{}) rather than raising.
+    gracefully (return None/False/{}) rather than raising. Tool execution preserves
+    tool exceptions; project lifecycle coordination reports failures to the initiating user.
     """
+
+    def project_rename_context(self, old_name: str, new_name: str) -> contextlib.AbstractContextManager:
+        """Coordinate an explicit project rename; ordinary providers need no action."""
+        del old_name, new_name
+        return contextlib.nullcontext()
+
+    def project_delete_context(self, name: str) -> contextlib.AbstractContextManager:
+        """Coordinate project deletion around the local commit; default to no action."""
+        del name
+        return contextlib.nullcontext()
 
     @abstractmethod
     def initialize(self) -> None:
@@ -124,6 +136,54 @@ class ObservabilityProvider(ABC):
         Must never raise; degrade silently to nullcontext() on any failure.
         """
         return contextlib.nullcontext()
+
+    def get_run_context(  # noqa: PLR0913 - keyword-only run attributes
+        self,
+        *,
+        trace_name: str,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        tags: list[str] | None = None,
+        user_input: str | None = None,  # noqa: ARG002 - for overriding providers
+        project: str | None = None,  # noqa: ARG002 - for overriding providers
+        workflow_execution_id: str | None = None,  # noqa: ARG002 - for overriding providers
+    ):
+        """Return the context manager an agent run executes in (the run config's ``_trace_ctx``).
+
+        The default is ``get_trace_context`` with the trace attributes. A provider that records
+        the run itself overrides it: it also gets the user's input, the CodeMie project and the
+        workflow execution the run belongs to.
+
+        Must never raise; degrade silently to nullcontext() on any failure.
+        """
+        return self.get_trace_context(trace_name=trace_name, user_id=user_id, session_id=session_id, tags=tags)
+
+    def get_workflow_run_context(
+        self,
+        *,
+        execution_id: str,  # noqa: ARG002 - for overriding providers
+        workflow_name: str,  # noqa: ARG002 - for overriding providers
+        project: str | None = None,  # noqa: ARG002 - for overriding providers
+        user_input: str | None = None,  # noqa: ARG002 - for overriding providers
+    ):
+        """Return the context manager one workflow run (or resume) executes in.
+
+        Agent runs inside it see it as their enclosing context. Default implementation returns
+        nullcontext(). Must never raise.
+        """
+        return contextlib.nullcontext()
+
+    def execute_tool(self, name: str, execute: Callable[..., Any], arguments: dict[str, Any]) -> Any:
+        """Execute a direct workflow tool once, preserving its result and exceptions."""
+        del name
+        return execute(**arguments)
+
+    def wrap_chat_model(self, llm: Any) -> Any:
+        """Return the chat model CodeMie uses for ``llm``; a provider may wrap it to see each call.
+
+        Default implementation returns ``llm`` unchanged. Must never raise.
+        """
+        return llm
 
     def update_current_observation(
         self,

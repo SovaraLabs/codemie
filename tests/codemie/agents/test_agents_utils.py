@@ -15,7 +15,7 @@
 from inspect import signature
 
 import pytest
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import ANY, patch, Mock, MagicMock
 from typing import Dict, Any, List, Generator
 from langchain_core.tools import ToolException
 
@@ -35,7 +35,7 @@ from codemie.agents.utils import (
     to_snake_case,
 )
 from codemie.core.errors import ErrorResponse, ErrorCategory, InternalError, LiteLLMErrorClassifier
-from codemie.core.models import CodeFields
+from codemie.core.models import AssistantChatRequest, CodeFields
 from codemie.core.constants import CodeIndexType
 from codemie.configs import config
 from codemie.enterprise.litellm.proxy_router import emit_llm_error_log, handle_agent_exception
@@ -722,3 +722,31 @@ class TestGetRunConfigLangfuseCallbacks:
         assert len(cfg["callbacks"]) == 2
         assert cfg["run_name"] == "TestAgent"
         assert cfg["metadata"] == {"k": "v"}
+
+
+class TestGetRunConfigRunContext:
+    """The provider's run context becomes _trace_ctx, with what a provider needs to record the run."""
+
+    @patch("codemie.agents.utils.get_observability_provider")
+    def test_run_context_gets_input_project_and_workflow_execution(self, mock_get_provider):
+        provider = MagicMock()
+        provider.should_trace_request.return_value = True
+        provider.get_callback_handler.return_value = None
+        provider.build_agent_metadata.return_value = {}
+        mock_get_provider.return_value = provider
+        request = AssistantChatRequest(text="hi", workflow_execution_id="exec-1")
+
+        cfg = get_run_config(
+            request=request, llm_model="gpt", agent_name="A", conversation_id="conv-1", project="payments"
+        )
+
+        provider.get_run_context.assert_called_once_with(
+            trace_name="A",
+            user_id=None,
+            session_id="conv-1",
+            tags=ANY,
+            user_input="hi",
+            project="payments",
+            workflow_execution_id="exec-1",
+        )
+        assert cfg["_trace_ctx"] is provider.get_run_context.return_value

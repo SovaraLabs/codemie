@@ -676,7 +676,7 @@ class Config(BaseSettings):
         "opentelemetry.instrumentation.httpx",
     ]
 
-    # Observability provider selection: "langfuse" | "phoenix" | "none"
+    # Observability provider selection: "langfuse" | "phoenix" | "sovara" | "none"
     # Backward-compat: if unset/none AND LANGFUSE_TRACES=True, Langfuse is used automatically.
     OBSERVABILITY_PROVIDER: str = "none"
 
@@ -685,6 +685,11 @@ class Config(BaseSettings):
     PHOENIX_PROJECT_NAME: str = "codemie"
     PHOENIX_API_KEY: str | None = None
     PHOENIX_BATCH_SPAN_PROCESSOR: bool = True
+
+    # Sovara settings — used when OBSERVABILITY_PROVIDER=sovara (needs the sovara-langchain package).
+    # Both the project API and recording API must be reachable at this origin.
+    SOVARA_SERVER_URL: str | None = None
+    SOVARA_API_KEY: str | None = None
 
     # ===========================================
     # OpenTelemetry Configuration

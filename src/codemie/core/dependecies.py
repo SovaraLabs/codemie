@@ -333,7 +333,11 @@ def get_llm_by_credentials(
         logger.debug(f"Prompt caching explicitly disabled for model={llm_model}")
     elif is_vertex_claude:
         logger.debug(f"Prompt caching not supported for Vertex AI Claude models: {llm_model}")
-    return llm
+
+    # Last, so a provider that wraps the model keeps the callbacks set above.
+    from codemie.enterprise.observability import get_observability_provider  # noqa: PLC0415 - circular import
+
+    return get_observability_provider().wrap_chat_model(llm)
 
 
 class LLMClientWrapper:

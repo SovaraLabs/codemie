@@ -14,6 +14,7 @@
 
 """Unit tests for ProjectService.delete_project and ProjectService.update_project."""
 
+from contextlib import contextmanager
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -83,6 +84,45 @@ def _counts_with(project_name: str, **overrides) -> dict[str, dict]:
 
 class TestProjectServiceDeleteProject:
     """Tests for ProjectService.delete_project."""
+
+    @pytest.mark.parametrize("commit_fails", [False, True])
+    @patch("codemie.service.project.project_service.get_observability_provider")
+    @patch("codemie.service.project.project_service.user_project_repository")
+    @patch("codemie.service.project.project_service.application_repository")
+    def test_remote_delete_follows_local_commit(self, mock_app_repo, mock_upr, provider_factory, commit_fails):
+        session = MagicMock()
+        mock_upr.get_by_project_name.return_value = []
+        mock_app_repo.get_project_entity_counts_bulk.return_value = _zero_counts("my-project")
+        events = []
+
+        @contextmanager
+        def deletion(name):
+            assert name == "my-project"
+            events.append("resolve")
+            yield
+            events.append("remote delete")
+
+        def commit():
+            mock_app_repo.delete_by_name.assert_called_once_with(session, "my-project")
+            events.append("commit")
+            if commit_fails:
+                raise ValueError("commit failed")
+
+        provider_factory.return_value.project_delete_context.side_effect = deletion
+        session.commit.side_effect = commit
+        kwargs = {
+            "session": session,
+            "project_name": "my-project",
+            "project_type": "shared",
+            "actor_id": "user-1",
+            "action": "DELETE",
+        }
+        if commit_fails:
+            with pytest.raises(ValueError):
+                ProjectService.delete_project(**kwargs)
+        else:
+            ProjectService.delete_project(**kwargs)
+        assert events == (["resolve", "commit"] if commit_fails else ["resolve", "commit", "remote delete"])
 
     @patch("codemie.service.project.project_service.application_repository")
     def test_personal_project_raises_403(self, mock_app_repo):
@@ -628,6 +668,38 @@ class TestProjectServiceUpdateProject:
         user.id = "auditor-1"
         user.is_admin_or_maintainer = False
         return user
+
+    @pytest.mark.parametrize("renaming", [False, True])
+    @patch("codemie.service.project.project_service.get_observability_provider")
+    @patch("codemie.service.project.project_service.cost_center_service")
+    @patch("codemie.service.project.project_service.application_repository")
+    @patch("codemie.service.project.project_service.get_session")
+    def test_name_change_coordinates_observability_through_commit(
+        self, mock_get_session, mock_app_repo, mock_cc_service, mock_provider, renaming
+    ):
+        session = mock_get_session.return_value.__enter__.return_value
+        project = _make_app("my-project")
+        mock_app_repo.get_by_name.return_value = project
+        mock_app_repo.get_by_name_case_insensitive.return_value = None
+        mock_app_repo.get_project_entity_counts_bulk.return_value = _zero_counts("my-project")
+        mock_app_repo.update_project.return_value = project
+        events = []
+
+        @contextmanager
+        def rename(old, new):
+            events.append((old, new))
+            yield
+            events.append("remote complete")
+
+        mock_provider.return_value.project_rename_context.side_effect = rename
+        session.commit.side_effect = lambda: events.append("commit")
+        ProjectService.update_project(
+            self._make_super_admin(),
+            "my-project",
+            name="renamed" if renaming else None,
+            display_name="New display label",
+        )
+        assert events == ([("my-project", "renamed"), "commit", "remote complete"] if renaming else ["commit"])
 
     @patch("codemie.service.project.project_service.user_project_repository")
     @patch("codemie.service.project.project_service.application_repository")

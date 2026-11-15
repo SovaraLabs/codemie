@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import traceback
+import contextlib
 import json
 from operator import itemgetter
 from pydantic import BaseModel
@@ -65,10 +66,10 @@ class PureChatChain(StreamingChain):
         return {"question": self.request.text, "chat_history": self.request.history}
 
     def invoke(self, inputs: Dict[str, Any]) -> GenerationResult:
-        response = self._chain.invoke(
-            input=inputs,
-            config=self._get_config(),
-        )
+        config = self._get_config()
+        # Enter the observability trace context, as the agents do.
+        with config.pop("_trace_ctx", contextlib.nullcontext()):
+            response = self._chain.invoke(input=inputs, config=config)
 
         return GenerationResult(
             generated=response,
@@ -85,15 +86,13 @@ class PureChatChain(StreamingChain):
         chunks_collector = []
         try:
             chain = self._chain.with_config(callbacks=[ChainStreamingCallback(self.thread_generator)])
-            stream = chain.stream(
-                input=self._get_inputs(),
-                config=self._get_config(),
-            )
-            for chunk in stream:
-                if not chunk:
-                    continue
+            config = self._get_config()
+            with config.pop("_trace_ctx", contextlib.nullcontext()):
+                for chunk in chain.stream(input=self._get_inputs(), config=config):
+                    if not chunk:
+                        continue
 
-                chunks_collector.append(chunk)
+                    chunks_collector.append(chunk)
 
             if isinstance(chunk, dict):
                 generated = json.dumps(chunk)
@@ -166,4 +165,5 @@ class PureChatChain(StreamingChain):
             conversation_id=self.request.conversation_id if self.request else None,
             username=self.user.username if self.user and self.user.username else None,
             additional_tags=["execution_engine:pure_chat_chain"],
+            project=self.project.name if self.project else None,
         )

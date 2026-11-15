@@ -2222,7 +2222,7 @@ class TestDeleteProjectEndpoint:
             action="DELETE /v1/projects/my-project",
             creator_id=authorized_project.created_by,
         )
-        mock_session.commit.assert_called_once()
+        mock_session.commit.assert_not_called()
 
     @patch("codemie.rest_api.routers.projects._common.config")
     @patch("codemie.rest_api.routers.projects.management.get_session")
