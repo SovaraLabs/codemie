@@ -106,3 +106,45 @@ def test_rejected_rename_never_enters_local_mutation(project_api, status):
         with api.rename("old", "new"):
             pytest.fail("Rejected rename must not mutate CodeMie")
     assert len(transport.get_requests()) == 2
+
+
+@pytest.mark.parametrize("status", [200, 404, 403, 500])
+def test_delete_retries_same_id_and_reports_partial_failure(project_api, status):
+    _, transport = project_api
+    transport.add_response(method="GET", json={"project_id": "p1"})
+    transport.add_exception(httpx.ReadTimeout("synthetic"), method="DELETE")
+    transport.add_response(method="DELETE", status_code=status, is_reusable=status == 500)
+    provider = SovaraObservabilityProvider()
+    provider._clients["research"] = object()
+
+    def delete():
+        with provider.project_delete_context("research"):
+            assert [r.method for r in transport.get_requests()] == ["GET"]
+
+    if status in (200, 404):
+        delete()
+    else:
+        with pytest.raises(ExtendedHTTPException) as exc:
+            delete()
+        assert "CodeMie project was deleted" in exc.value.message
+        assert "p1" in exc.value.message
+    assert "research" not in provider._clients
+    assert all(str(r.url) == "https://sovara.test/api/projects/p1" for r in transport.get_requests()[1:])
+
+
+@pytest.mark.parametrize("exists", [True, False])
+def test_local_delete_failure_preserves_sovara_history(project_api, exists):
+    api, transport = project_api
+    transport.add_response(method="GET", status_code=200 if exists else 404, json={"project_id": "p1"})
+    with pytest.raises(ValueError):
+        with api.delete("research"):
+            raise ValueError("local commit failed")
+    assert len(transport.get_requests()) == 1
+
+
+def test_delete_unprovisioned_project_needs_no_remote_write(project_api):
+    api, transport = project_api
+    transport.add_response(method="GET", status_code=404)
+    with api.delete("research"):
+        pass
+    assert len(transport.get_requests()) == 1

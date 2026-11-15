@@ -45,6 +45,11 @@ class ObservabilityProvider(ABC):
         del old_name, new_name
         return contextlib.nullcontext()
 
+    def project_delete_context(self, name: str) -> contextlib.AbstractContextManager:
+        """Coordinate project deletion around the local commit; default to no action."""
+        del name
+        return contextlib.nullcontext()
+
     @abstractmethod
     def initialize(self) -> None:
         """Initialize the provider (connect, register handlers). Called once at app startup."""

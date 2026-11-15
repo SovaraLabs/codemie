@@ -252,6 +252,16 @@ class SovaraObservabilityProvider(ObservabilityProvider):
                 self._clients.pop(old_name, None)
                 self._clients.pop(new_name, None)
 
+    @contextmanager
+    def project_delete_context(self, name: str) -> Iterator[None]:
+        """Delete Sovara history after the CodeMie commit and discard the cached client."""
+        try:
+            with self._projects.delete(name):
+                yield
+        finally:
+            with self._lock:
+                self._clients.pop(name, None)
+
     def _client(self, project: str | None) -> Any:
         """Return the Sovara client for a CodeMie project, created on first use."""
         name = (project or "").strip()

@@ -85,6 +85,45 @@ def _counts_with(project_name: str, **overrides) -> dict[str, dict]:
 class TestProjectServiceDeleteProject:
     """Tests for ProjectService.delete_project."""
 
+    @pytest.mark.parametrize("commit_fails", [False, True])
+    @patch("codemie.service.project.project_service.get_observability_provider")
+    @patch("codemie.service.project.project_service.user_project_repository")
+    @patch("codemie.service.project.project_service.application_repository")
+    def test_remote_delete_follows_local_commit(self, mock_app_repo, mock_upr, provider_factory, commit_fails):
+        session = MagicMock()
+        mock_upr.get_by_project_name.return_value = []
+        mock_app_repo.get_project_entity_counts_bulk.return_value = _zero_counts("my-project")
+        events = []
+
+        @contextmanager
+        def deletion(name):
+            assert name == "my-project"
+            events.append("resolve")
+            yield
+            events.append("remote delete")
+
+        def commit():
+            mock_app_repo.delete_by_name.assert_called_once_with(session, "my-project")
+            events.append("commit")
+            if commit_fails:
+                raise ValueError("commit failed")
+
+        provider_factory.return_value.project_delete_context.side_effect = deletion
+        session.commit.side_effect = commit
+        kwargs = {
+            "session": session,
+            "project_name": "my-project",
+            "project_type": "shared",
+            "actor_id": "user-1",
+            "action": "DELETE",
+        }
+        if commit_fails:
+            with pytest.raises(ValueError):
+                ProjectService.delete_project(**kwargs)
+        else:
+            ProjectService.delete_project(**kwargs)
+        assert events == (["resolve", "commit"] if commit_fails else ["resolve", "commit", "remote delete"])
+
     @patch("codemie.service.project.project_service.application_repository")
     def test_personal_project_raises_403(self, mock_app_repo):
         """delete_project raises 403 for personal projects regardless of resources."""

@@ -116,6 +116,30 @@ class SovaraProjects:
             self._restore(project_id, new_name, old_name)
             raise
 
+    @contextmanager
+    def delete(self, name: str) -> Iterator[None]:
+        """Resolve before the local transaction, then delete that ID after its commit."""
+        project_id = self._resolve(name)
+        yield
+        if project_id is None:
+            return
+        try:
+            response = self._request("DELETE", "/" + quote(project_id, safe=""))
+            if response.status_code != HTTPStatus.NOT_FOUND:
+                self._require_success(response)
+        except Exception as exc:
+            logger.error(
+                f"Sovara project deletion requires reconciliation. project_id={project_id} "
+                f"error_type={type(exc).__name__}"
+            )
+            raise ExtendedHTTPException(
+                code=503,
+                message=(
+                    "CodeMie project was deleted, but Sovara cleanup failed. "
+                    f"Delete Sovara project {project_id} before reusing the CodeMie project name."
+                ),
+            ) from None
+
     def _restore(self, project_id: str, new_name: str, old_name: str) -> None:
         try:
             self._rename(project_id, new_name, old_name)

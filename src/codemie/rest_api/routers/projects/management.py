@@ -198,7 +198,6 @@ def delete_project(
             action=f"{request.method} {request.url.path}",
             creator_id=authorized_project.created_by,
         )
-        session.commit()
 
     return ProjectDeleteResponse(
         message=f"Project '{project_name}' deleted successfully",
