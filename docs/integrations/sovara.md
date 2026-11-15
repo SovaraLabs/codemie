@@ -7,7 +7,8 @@ so you can inspect how the agent used them.
 
 ## Configure CodeMie
 
-Set these environment variables in your CodeMie deployment:
+Sovara support is included in CodeMie enterprise builds. For non-enterprise
+installations, use `poetry install --extras sovara`. Set these environment variables:
 
 ```bash
 OBSERVABILITY_PROVIDER=sovara
@@ -18,7 +19,7 @@ SOVARA_API_KEY=<organization-api-key>
 Use `https://app.sovara-labs.com` for Sovara's hosted service, or your organization's
 Sovara URL for an on-premises deployment. Supply an organization API key through
 your deployment's secret configuration, then restart or redeploy CodeMie and its
-workflow workers. CodeMie uses one observability provider at a time.
+workflow workers.
 
 ## Try your first lesson
 
@@ -42,10 +43,3 @@ workflow workers. CodeMie uses one observability provider at a time.
 The agent can use that company convention even though you did not include it in
 your prompt. Add your own domain knowledge using the same flow. See
 [creating and managing lessons](https://docs.sovara-labs.com/sovaradb/creating-managing-lessons).
-
-## Recording coverage
-
-Sovara records conversations, workflow model calls and tools executed through
-LangChain, including agent-invoked MCP tools. Direct workflow tool nodes are not
-recorded. See [Sovara traces](https://docs.sovara-labs.com/observability/traces)
-and the [LangChain/LangGraph integration](https://docs.sovara-labs.com/integrations/langchain).

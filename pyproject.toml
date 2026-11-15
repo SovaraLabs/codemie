@@ -16,6 +16,8 @@ include = ["llm-templates/**/*"]
 packages = [{ include = "codemie", from = "src" }, { include = "codemie_tools", from = "src" }]
 
 [tool.poetry.dependencies]
+sovara = {version = ">=0.11.0,<0.12", optional = true}
+sovara-langchain = {version = ">=0.1.1,<0.2", optional = true}
 python = ">=3.12,<3.14" # upper limit is required because of youtube-transcript-api from markitdown
 azure-devops = "^7.1.0b4"
 azure-keyvault-keys = "^4.9.0"
@@ -193,7 +195,8 @@ nemo-switchyard = "^0.2.0"
 
 
 [tool.poetry.extras]
-enterprise = ["codemie-enterprise"]
+enterprise = ["codemie-enterprise", "sovara", "sovara-langchain"]
+sovara = ["sovara", "sovara-langchain"]
 pdf-svg = ["cairosvg"]
 
 [tool.poetry.group.dev.dependencies]
