@@ -232,3 +232,80 @@ class TestBaseDefaults:
             ObservabilityProvider.get_workflow_run_context(provider, execution_id="e", workflow_name="W"), nullcontext
         )
         assert ObservabilityProvider.wrap_chat_model(provider, model) is model
+
+
+@pytest.fixture
+def tool_recording(provider):
+    integration = types.SimpleNamespace(
+        capture_active=Mock(return_value=True),
+        json_value=Mock(side_effect=lambda value: value),
+        begin=Mock(return_value=object()),
+        report=Mock(),
+        report_raised=Mock(),
+    )
+    sys.modules["sovara"].integration = integration
+    sys.modules["sovara"].ToolCall = Mock()
+    sys.modules["sovara"].ErrorInfo = Mock()
+    return integration
+
+
+@pytest.mark.parametrize("mcp_error", [None, False, True])
+def test_direct_tool_records_outcome_and_preserves_result(provider, tool_recording, mcp_error):
+    from codemie.service.mcp.models import MCPToolInvocationResponse
+
+    result = {"value": "done"} if mcp_error is None else MCPToolInvocationResponse(content=[], isError=mcp_error)
+    execute = Mock(return_value=result)
+
+    assert provider.execute_tool("lookup", execute, {"query": "invoice"}) is result
+
+    execute.assert_called_once_with(query="invoice")
+    sys.modules["sovara"].ToolCall.assert_called_once_with(name="lookup", arguments={"query": "invoice"})
+    output = {"value": "done"} if mcp_error is None else {"content": [], "isError": mcp_error}
+    if mcp_error:
+        tool_recording.report.assert_called_once_with(
+            tool_recording.begin.return_value, "fail", sys.modules["sovara"].ErrorInfo.return_value, output=output
+        )
+    else:
+        tool_recording.report.assert_called_once_with(tool_recording.begin.return_value, "finish", output)
+
+
+@pytest.mark.parametrize("failure", ["begin", "report", "disabled", "inactive", "unrecorded"])
+def test_recording_failure_or_inactive_capture_never_reexecutes_tool(provider, tool_recording, failure):
+    if failure in {"begin", "report"}:
+        getattr(tool_recording, failure).side_effect = RuntimeError("recording unavailable")
+    elif failure == "disabled":
+        provider._enabled = False
+    elif failure == "inactive":
+        tool_recording.capture_active.return_value = False
+    else:
+        tool_recording.begin.return_value = None
+    execute = Mock(return_value=object())
+
+    assert provider.execute_tool("lookup", execute, {}) is execute.return_value
+    execute.assert_called_once_with()
+
+    error = TypeError("tool failed")
+    execute.reset_mock()
+    execute.side_effect = error
+    with pytest.raises(TypeError) as caught:
+        provider.execute_tool("lookup", execute, {})
+    assert caught.value is error
+    execute.assert_called_once_with()
+
+
+@pytest.mark.parametrize("error", [TypeError("tool failed"), KeyboardInterrupt()])
+@pytest.mark.parametrize("report_fails", [False, True])
+def test_direct_tool_failure_is_recorded_without_replacing_original_error(
+    provider, tool_recording, error, report_fails
+):
+    execute = Mock(side_effect=error)
+    if report_fails:
+        tool_recording.report_raised.side_effect = RuntimeError("recording unavailable")
+
+    with pytest.raises(type(error)) as caught:
+        provider.execute_tool("lookup", execute, {})
+
+    assert caught.value is error
+    execute.assert_called_once_with()
+    tool_recording.report_raised.assert_called_once_with(tool_recording.begin.return_value, error)
+    tool_recording.report.assert_not_called()

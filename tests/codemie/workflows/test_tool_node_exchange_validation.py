@@ -224,3 +224,25 @@ def test_annotation_only_schema_falls_back_to_name_label():
 
     assert "'value': 'str'" in str(exc_info.value)
     tool.execute.assert_not_called()
+
+
+def test_validated_arguments_and_result_pass_through_observability_hook():
+    from codemie.enterprise.observability.noop_provider import NoOpObservabilityProvider
+
+    class Args(BaseModel):
+        value: str
+
+    tool = MagicMock(args_schema=Args)
+    tool.execute.return_value = {"value": "result"}
+    provider = NoOpObservabilityProvider()
+    with (
+        patch("codemie.workflows.nodes.tool_node.get_observability_provider", return_value=provider),
+        patch.object(provider, "execute_tool", wraps=provider.execute_tool) as record,
+    ):
+        result = _node({"value": "input", "omitted": None})._execute_tool_with_args(
+            tool, {CONTEXT_STORE_VARIABLE: {}, MESSAGES_VARIABLE: []}
+        )
+
+    record.assert_called_once_with("exchange_tool", tool.execute, {"value": "input"})
+    tool.execute.assert_called_once_with(value="input")
+    assert result is tool.execute.return_value
