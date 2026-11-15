@@ -19,6 +19,7 @@ from functools import cached_property
 
 from pydantic import BaseModel, ValidationError
 
+from codemie.enterprise.observability import get_observability_provider
 from codemie.core.utils import build_unique_file_objects_list
 from codemie.core.workflow_models import WorkflowState, WorkflowConfig, WorkflowTool
 from codemie.service.mcp.models import MCPToolInvocationResponse
@@ -321,9 +322,9 @@ class ToolNode(BaseNode[AgentMessages]):
         # logic (including a ValidationError or TypeError the tool raises itself) propagates
         # unchanged, with its original traceback, instead of being misreported as an invalid
         # signature.
-        result = tool.execute(**tool_input)
+        result = get_observability_provider().execute_tool(self._tool_config.tool, tool.execute, tool_input)
 
-        logger.debug(f"Tool node execution result: {result}")
+        logger.debug("Tool node execution completed")
         return result
 
     @staticmethod

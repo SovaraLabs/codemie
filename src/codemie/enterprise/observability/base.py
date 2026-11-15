@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any, Literal
 
 ObservationLevel = Literal["DEFAULT", "DEBUG", "WARNING", "ERROR"]
@@ -36,8 +37,8 @@ class ObservabilityProvider(ABC):
 
     Implementations must be safe to call at any time — before initialization,
     after shutdown, or when the backend is unavailable. All methods must degrade
-    gracefully (return None/False/{}) rather than raising, except explicit project
-    lifecycle coordination, which must report failures to the initiating user.
+    gracefully (return None/False/{}) rather than raising. Tool execution preserves
+    tool exceptions; project lifecycle coordination reports failures to the initiating user.
     """
 
     def project_rename_context(self, old_name: str, new_name: str) -> contextlib.AbstractContextManager:
@@ -171,6 +172,11 @@ class ObservabilityProvider(ABC):
         nullcontext(). Must never raise.
         """
         return contextlib.nullcontext()
+
+    def execute_tool(self, name: str, execute: Callable[..., Any], arguments: dict[str, Any]) -> Any:
+        """Execute a direct workflow tool once, preserving its result and exceptions."""
+        del name
+        return execute(**arguments)
 
     def wrap_chat_model(self, llm: Any) -> Any:
         """Return the chat model CodeMie uses for ``llm``; a provider may wrap it to see each call.

@@ -21,8 +21,8 @@
 - An agent run inside another recorded run is a subtrace of it, in the same project.
 
 Model calls are recorded by wrapping each chat model with ``sovara_langchain.wrap_chat_model``,
-which also adds the lessons; tool calls through LangChain's tool execution. HTTP clients are not
-patched. Sovara failures never fail a CodeMie run: it continues unrecorded.
+which also adds the lessons. Tools are recorded through LangChain or the direct workflow
+execution hook. HTTP clients are not patched. Sovara failures never fail a CodeMie run: it continues unrecorded.
 
 ``sovara-langchain`` is an optional package: the factory selects this provider only when it is
 installed, and it is imported here only then.
@@ -34,12 +34,13 @@ installed, and it is imported here only then.
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from contextvars import ContextVar
 from typing import Any
 
 from codemie.configs import config, logger
+from codemie.service.mcp.models import MCPToolInvocationResponse
 
 from .base import ObservabilityProvider
 from .sovara_projects import SovaraProjects
@@ -149,6 +150,44 @@ class SovaraObservabilityProvider(ObservabilityProvider):
             return lambda fn: fn
 
         return observe
+
+    def execute_tool(self, name: str, execute: Callable[..., Any], arguments: dict[str, Any]) -> Any:
+        """Record a direct workflow tool without changing its execution or error behavior."""
+        if not self._enabled:
+            return execute(**arguments)
+        try:
+            from sovara import ErrorInfo, ToolCall, integration  # noqa: PLC0415 - optional package
+
+            step = (
+                integration.begin(ToolCall(name=name, arguments=integration.json_value(arguments)))
+                if integration.capture_active()
+                else None
+            )
+        except Exception as exc:
+            _warn_unrecorded(exc)
+            step = None
+        if step is None:
+            return execute(**arguments)
+
+        try:
+            result = execute(**arguments)
+        except BaseException as exc:
+            try:
+                integration.report_raised(step, exc)
+            except Exception as recording_error:
+                _warn_unrecorded(recording_error)
+            raise
+
+        try:
+            is_mcp = isinstance(result, MCPToolInvocationResponse)
+            output = integration.json_value(result.model_dump(mode="json") if is_mcp else result)
+            if is_mcp and result.isError:
+                integration.report(step, "fail", ErrorInfo(type="MCPToolError"), output=output)
+            else:
+                integration.report(step, "finish", output)
+        except Exception as exc:
+            _warn_unrecorded(exc)
+        return result
 
     def wrap_chat_model(self, llm: Any) -> Any:
         if not self._enabled:
